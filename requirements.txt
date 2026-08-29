@@ -6,3 +6,7 @@ numpy
 seaborn
 scikit-learn
 streamlit
+Pillow
+opencv-python
+tqdm
+timm
