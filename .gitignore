@@ -5,3 +5,5 @@ __pycache__/
 
 CASIA/
 data/
+
+results_backup/

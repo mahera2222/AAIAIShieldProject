@@ -1,9 +1,7 @@
 torch
 torchvision
-torchattacks
 matplotlib
 numpy
-seaborn
 scikit-learn
 streamlit
 Pillow

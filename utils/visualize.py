@@ -1,41 +1,48 @@
-import sys, os
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(ROOT)
+import os
+import sys
+
+ROOT = os.path.dirname(
+    os.path.dirname(
+        os.path.abspath(__file__)
+    )
+)
+
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 
 import torch
 import matplotlib.pyplot as plt
-import numpy as np
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
+from sklearn.metrics import (
+    classification_report,
+    confusion_matrix,
+    roc_curve,
+    auc
+)
 
 from models.efficientnet_lite0 import EfficientNetLite0Tamper
-from sklearn.metrics import classification_report, roc_curve, auc
 
 
-# ---------------------------------------------------
-# 🔧 SETTINGS
-# ---------------------------------------------------
-DEVICE = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+# Device setup
+if torch.cuda.is_available():
+    DEVICE = torch.device("cuda")
+elif torch.backends.mps.is_available():
+    DEVICE = torch.device("mps")
+else:
+    DEVICE = torch.device("cpu")
+
+
 MODEL_PATH = "saved_models/efficient_lite0.pth"
 RESULT_DIR = "results"
-os.makedirs(RESULT_DIR, exist_ok=True)
+
+os.makedirs(
+    RESULT_DIR,
+    exist_ok=True
+)
 
 
-# ---------------------------------------------------
-# 📌 Load model
-# ---------------------------------------------------
-def load_model():
-    model = EfficientNetLite0Tamper(num_classes=2).to(DEVICE)
-    state_dict = torch.load(MODEL_PATH, map_location=DEVICE)
-    model.load_state_dict(state_dict)
-    model.eval()
-    return model
-
-
-
-# ---------------------------------------------------
-# 📌 Prepare data for visualization
-# ---------------------------------------------------
+# Preprocessing must match training/inference
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
@@ -45,163 +52,530 @@ transform = transforms.Compose([
     )
 ])
 
-test_data = datasets.ImageFolder("data/val", transform=transform)
-test_loader = DataLoader(test_data, batch_size=16, shuffle=True)
+
+# Validation dataset
+val_data = datasets.ImageFolder(
+    "data/val",
+    transform=transform
+)
+
+val_loader = DataLoader(
+    val_data,
+    batch_size=16,
+    shuffle=False
+)
 
 
-# ---------------------------------------------------
-# 📌 SAMPLE PREDICTION GRID
-# ---------------------------------------------------
-def save_sample_predictions(model):
-    X, y = next(iter(test_loader))
-    X = X.to(DEVICE)
-    preds = model(X).argmax(dim=1).cpu()
+def load_model():
+    model = EfficientNetLite0Tamper(
+        num_classes=2,
+        pretrained=False
+    ).to(DEVICE)
 
-    fig, axs = plt.subplots(3, 3, figsize=(7, 7))
-    idx = 0
+    state_dict = torch.load(
+        MODEL_PATH,
+        map_location=DEVICE
+    )
 
-    for r in range(3):
-        for c in range(3):
-            img = X[idx].cpu().permute(1, 2, 0).numpy()
-            img = (img - img.min()) / (img.max() - img.min())  # Normalize for display
-
-            axs[r, c].imshow(img)
-            axs[r, c].set_title(f"P={preds[idx]} | T={y[idx]}")
-            axs[r, c].axis("off")
-            idx += 1
-
-    plt.tight_layout()
-    path = f"{RESULT_DIR}/sample_predictions.png"
-    plt.savefig(path)
-    plt.close()
-    print("Saved sample predictions:", path)
-
-
-# ---------------------------------------------------
-# 📌 LOSS CURVE
-# ---------------------------------------------------
-def plot_loss_curve(history):
-    plt.figure(figsize=(8, 5))
-    plt.plot(history["loss"], label="Training Loss", linewidth=2)
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.title("Loss Curve")
-    plt.grid(True)
-    plt.legend()
-
-    path = f"{RESULT_DIR}/loss_curve.png"
-    plt.savefig(path)
-    plt.close()
-    print("Saved loss curve:", path)
-
-
-# ---------------------------------------------------
-# 📌 ACCURACY CURVE
-# ---------------------------------------------------
-def plot_accuracy_curve(history):
-    plt.figure(figsize=(8, 5))
-    plt.plot(history["acc"], label="Accuracy", color="green", linewidth=2)
-    plt.xlabel("Epoch")
-    plt.ylabel("Accuracy")
-    plt.title("Accuracy Curve")
-    plt.grid(True)
-    plt.legend()
-
-    path = f"{RESULT_DIR}/accuracy_curve.png"
-    plt.savefig(path)
-    plt.close()
-    print("Saved accuracy curve:", path)
-
-
-# ---------------------------------------------------
-# 📌 COMBINED LOSS + ACCURACY CURVE
-# ---------------------------------------------------
-def plot_loss_accuracy(history):
-    fig, ax1 = plt.subplots(figsize=(8, 5))
-
-    ax1.set_xlabel("Epoch")
-    ax1.set_ylabel("Loss", color="red")
-    ax1.plot(history["loss"], color="red", linewidth=2, label="Loss")
-    ax1.tick_params(axis='y', labelcolor="red")
-
-    ax2 = ax1.twinx()
-    ax2.set_ylabel("Accuracy", color="blue")
-    ax2.plot(history["acc"], color="blue", linewidth=2, label="Accuracy")
-    ax2.tick_params(axis='y', labelcolor="blue")
-
-    plt.title("Loss + Accuracy Curve")
-    plt.grid(True)
-
-    path = f"{RESULT_DIR}/loss_accuracy_curve.png"
-    plt.savefig(path)
-    plt.close()
-    print("Saved combined curve:", path)
-
-
-# ---------------------------------------------------
-# 📌 ROC CURVE
-# ---------------------------------------------------
-def plot_roc_curve(model, loader, device, save_path="results/roc_curve.png"):
+    model.load_state_dict(
+        state_dict
+    )
 
     model.eval()
-    y_true = []
-    y_prob = []
+
+    return model
+
+
+def save_sample_predictions(model):
+    images, labels = next(
+        iter(val_loader)
+    )
+
+    images = images.to(DEVICE)
 
     with torch.no_grad():
-        for X, y in loader:
-            X = X.to(device)
-            logits = model(X)
+        predictions = model(
+            images
+        ).argmax(dim=1).cpu()
 
-            probs = torch.softmax(logits, dim=1)[:, 1]  # class 1 -> tampered
+    fig, axes = plt.subplots(
+        3,
+        3,
+        figsize=(7, 7)
+    )
 
-            y_true.extend(y.numpy())
-            y_prob.extend(probs.cpu().numpy())
+    index = 0
 
-    # Compute ROC
-    fpr, tpr, _ = roc_curve(y_true, y_prob)
-    roc_auc = auc(fpr, tpr)
+    for row in range(3):
+        for column in range(3):
 
-    # Plot
-    plt.figure(figsize=(7, 6))
+            image = (
+                images[index]
+                .cpu()
+                .permute(1, 2, 0)
+                .numpy()
+            )
+
+            image = (
+                image - image.min()
+            ) / (
+                image.max()
+                - image.min()
+                + 1e-9
+            )
+
+            axes[row, column].imshow(
+                image
+            )
+
+            axes[row, column].set_title(
+                f"P={predictions[index]} "
+                f"| T={labels[index]}"
+            )
+
+            axes[row, column].axis(
+                "off"
+            )
+
+            index += 1
+
+    plt.tight_layout()
+
+    path = os.path.join(
+        RESULT_DIR,
+        "sample_predictions.png"
+    )
+
+    plt.savefig(
+        path
+    )
+
+    plt.close()
+
+    print(
+        "Saved sample predictions:",
+        path
+    )
+
+
+def plot_loss_curve(history):
+    plt.figure(
+        figsize=(8, 5)
+    )
+
     plt.plot(
-        fpr, tpr,
-        color="darkorange",
-        lw=2,
+        history["loss"],
+        label="Training Loss",
+        linewidth=2
+    )
+
+    plt.xlabel(
+        "Epoch"
+    )
+
+    plt.ylabel(
+        "Loss"
+    )
+
+    plt.title(
+        "Training Loss Curve"
+    )
+
+    plt.grid(
+        True
+    )
+
+    plt.legend()
+
+    path = os.path.join(
+        RESULT_DIR,
+        "loss_curve.png"
+    )
+
+    plt.savefig(
+        path
+    )
+
+    plt.close()
+
+    print(
+        "Saved loss curve:",
+        path
+    )
+
+
+def plot_accuracy_curve(history):
+    plt.figure(
+        figsize=(8, 5)
+    )
+
+    plt.plot(
+        history["acc"],
+        label="Validation Accuracy",
+        linewidth=2
+    )
+
+    plt.xlabel(
+        "Epoch"
+    )
+
+    plt.ylabel(
+        "Accuracy"
+    )
+
+    plt.title(
+        "Validation Accuracy Curve"
+    )
+
+    plt.grid(
+        True
+    )
+
+    plt.legend()
+
+    path = os.path.join(
+        RESULT_DIR,
+        "accuracy_curve.png"
+    )
+
+    plt.savefig(
+        path
+    )
+
+    plt.close()
+
+    print(
+        "Saved accuracy curve:",
+        path
+    )
+
+
+def plot_loss_accuracy(history):
+    fig, ax1 = plt.subplots(
+        figsize=(8, 5)
+    )
+
+    ax1.set_xlabel(
+        "Epoch"
+    )
+
+    ax1.set_ylabel(
+        "Loss"
+    )
+
+    ax1.plot(
+        history["loss"],
+        linewidth=2,
+        label="Loss"
+    )
+
+    ax2 = ax1.twinx()
+
+    ax2.set_ylabel(
+        "Accuracy"
+    )
+
+    ax2.plot(
+        history["acc"],
+        linewidth=2,
+        label="Accuracy"
+    )
+
+    plt.title(
+        "Loss and Accuracy"
+    )
+
+    path = os.path.join(
+        RESULT_DIR,
+        "loss_accuracy_curve.png"
+    )
+
+    plt.savefig(
+        path
+    )
+
+    plt.close()
+
+    print(
+        "Saved combined curve:",
+        path
+    )
+
+
+def evaluate_model(model):
+    y_true = []
+    y_pred = []
+    y_prob = []
+
+    model.eval()
+
+    with torch.no_grad():
+
+        for images, labels in val_loader:
+
+            images = images.to(
+                DEVICE
+            )
+
+            outputs = model(
+                images
+            )
+
+            probabilities = torch.softmax(
+                outputs,
+                dim=1
+            )
+
+            predictions = outputs.argmax(
+                dim=1
+            )
+
+            y_true.extend(
+                labels.numpy()
+            )
+
+            y_pred.extend(
+                predictions.cpu().numpy()
+            )
+
+            y_prob.extend(
+                probabilities[:, 1]
+                .cpu()
+                .numpy()
+            )
+
+    report = classification_report(
+        y_true,
+        y_pred,
+        target_names=val_data.classes
+    )
+
+    print()
+    print("Classification Report:")
+    print(report)
+
+    report_path = os.path.join(
+        RESULT_DIR,
+        "report.txt"
+    )
+
+    with open(
+        report_path,
+        "w"
+    ) as file:
+        file.write(
+            report
+        )
+
+    print(
+        "Saved classification report:",
+        report_path
+    )
+
+    return y_true, y_pred, y_prob
+
+
+def plot_confusion_matrix(
+    y_true,
+    y_pred
+):
+    matrix = confusion_matrix(
+        y_true,
+        y_pred
+    )
+
+    plt.figure(
+        figsize=(6, 5)
+    )
+
+    plt.imshow(
+        matrix
+    )
+
+    plt.title(
+        "Confusion Matrix"
+    )
+
+    plt.xlabel(
+        "Predicted"
+    )
+
+    plt.ylabel(
+        "Actual"
+    )
+
+    plt.xticks(
+        range(len(val_data.classes)),
+        val_data.classes
+    )
+
+    plt.yticks(
+        range(len(val_data.classes)),
+        val_data.classes
+    )
+
+    for i in range(
+        matrix.shape[0]
+    ):
+        for j in range(
+            matrix.shape[1]
+        ):
+            plt.text(
+                j,
+                i,
+                str(matrix[i, j]),
+                ha="center",
+                va="center"
+            )
+
+    path = os.path.join(
+        RESULT_DIR,
+        "confusion_matrix.png"
+    )
+
+    plt.tight_layout()
+
+    plt.savefig(
+        path
+    )
+
+    plt.close()
+
+    print(
+        "Saved confusion matrix:",
+        path
+    )
+
+
+def plot_roc_curve(
+    y_true,
+    y_prob
+):
+    fpr, tpr, _ = roc_curve(
+        y_true,
+        y_prob
+    )
+
+    roc_auc = auc(
+        fpr,
+        tpr
+    )
+
+    plt.figure(
+        figsize=(7, 6)
+    )
+
+    plt.plot(
+        fpr,
+        tpr,
+        linewidth=2,
         label=f"ROC Curve (AUC = {roc_auc:.3f})"
     )
-    plt.plot([0, 1], [0, 1], color="navy", lw=2, linestyle="--")
 
-    plt.xlabel("False Positive Rate")
-    plt.ylabel("True Positive Rate")
-    plt.title("ROC Curve — Tampered Detection")
-    plt.legend(loc="lower right")
-    plt.grid(True)
+    plt.plot(
+        [0, 1],
+        [0, 1],
+        linestyle="--"
+    )
 
-    plt.savefig(save_path)
+    plt.xlabel(
+        "False Positive Rate"
+    )
+
+    plt.ylabel(
+        "True Positive Rate"
+    )
+
+    plt.title(
+        "ROC Curve - Tampered Detection"
+    )
+
+    plt.legend(
+        loc="lower right"
+    )
+
+    plt.grid(
+        True
+    )
+
+    path = os.path.join(
+        RESULT_DIR,
+        "roc_curve.png"
+    )
+
+    plt.savefig(
+        path
+    )
+
     plt.close()
-    print("Saved ROC curve:", save_path)
+
+    print(
+        "Saved ROC curve:",
+        path
+    )
 
 
-# ---------------------------------------------------
-# 📌 MAIN
-# ---------------------------------------------------
 if __name__ == "__main__":
 
-    print("📌 Loading model...")
+    print(
+        "Loading EfficientNet-Lite0 model..."
+    )
+
     model = load_model()
 
-    print("📌 Generating sample predictions...")
-    save_sample_predictions(model)
+    print(
+        "Generating sample predictions..."
+    )
 
-    print("📌 Loading training history...")
-    history = torch.load("results/history.pth")
+    save_sample_predictions(
+        model
+    )
 
-    print("📌 Plotting curves...")
-    plot_loss_curve(history)
-    plot_accuracy_curve(history)
-    plot_loss_accuracy(history)
+    print(
+        "Loading training history..."
+    )
 
-    print("📌 Plotting ROC Curve...")
-    plot_roc_curve(model, test_loader, DEVICE)
+    history = torch.load(
+        "results/history.pth",
+        map_location="cpu"
+    )
 
-    print("\n🎉 Visualization completed! Check the results/ folder.\n")
+    print(
+        "Generating training curves..."
+    )
+
+    plot_loss_curve(
+        history
+    )
+
+    plot_accuracy_curve(
+        history
+    )
+
+    plot_loss_accuracy(
+        history
+    )
+
+    print(
+        "Evaluating validation set..."
+    )
+
+    y_true, y_pred, y_prob = evaluate_model(
+        model
+    )
+
+    plot_confusion_matrix(
+        y_true,
+        y_pred
+    )
+
+    plot_roc_curve(
+        y_true,
+        y_prob
+    )
+
+    print()
+    print(
+        "Evaluation complete. "
+        "Check the results/ folder."
+    )

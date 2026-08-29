@@ -57,15 +57,17 @@ The project also contains utilities for:
 
 ## Results
 
-The saved evaluation report contains results on **1,912 test images**.
+The current EfficientNet-Lite0 model was evaluated on **1,912 validation images**.
 
 | Metric | Score |
 |---|---:|
-| Accuracy | 82% |
-| Macro F1-score | 0.77 |
-| Weighted F1-score | 0.83 |
+| Accuracy | 83% |
+| Macro F1-score | 0.76 |
+| Weighted F1-score | 0.84 |
+| Clean F1-score | 0.89 |
+| Tampered F1-score | 0.63 |
 
-Additional results such as the confusion matrix, ROC curve, loss curves, and sample predictions are available in the `results/` folder.
+Additional results such as the classification report, confusion matrix, ROC curve, loss curves, and sample predictions are available in the `results/` folder.
 
 ## Streamlit Application
 
@@ -109,6 +111,6 @@ Python, PyTorch, Torchvision, EfficientNet, NumPy, Matplotlib, Scikit-learn, Str
 
 ## Author
 
-Mahera Sultana Shaik  
-M.S. Applied Artificial Intelligence  
+Mahera Sultana Shaik
+M.S. Applied Artificial Intelligence
 Stevens Institute of Technology
