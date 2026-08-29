@@ -5,4 +5,4 @@ matplotlib
 numpy
 seaborn
 scikit-learn
-pip install torchattacks
+streamlit
